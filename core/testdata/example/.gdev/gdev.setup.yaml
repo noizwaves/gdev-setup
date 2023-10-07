@@ -2,4 +2,13 @@ steps:
   - key: foo
     command: echo foo
   - key: bar
-    command: echo bar
+    command: rm -f baz.txt
+  - key: baz
+    command: cat baz.txt && rm -f baz.txt
+    fixes:
+      - key: skipped
+        command: exit 1
+      - key: always-fails
+        command: exit 2
+      - key: touch-it
+        command: touch baz.txt
