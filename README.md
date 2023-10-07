@@ -6,15 +6,15 @@ Easily set up bare metal local dev environments.
 
 ### Commands
 
-Shell commands that:
-- exit with `0` when they succeed
-- exit with anything else when they fail
+Command results are determined by exit code.
+- `success`: exit with `0`
+- `failure`: anything else
 
 ### Fixes
 
-All fix commands are run in order exactly one time. `gdev-setup` continues regardless of fix exit code.
+Fixes will be attempted at most one time. A skip does not count as an attempt.
 
-Shell commands that:
-- exit with `0` when they succeed
-- exit with `1` when the fix skipped running
-- exit with anything else otherwise
+Fix results are determined by exit code.
+- `success`: exit with `0`
+- `skip`: exit with `1`
+- `failure`: anything else

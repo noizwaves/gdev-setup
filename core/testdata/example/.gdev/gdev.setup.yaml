@@ -2,13 +2,23 @@ steps:
   - key: foo
     command: echo foo
   - key: bar
-    command: rm -f baz.txt
+    command: rm -f baz1.txt baz2.txt
   - key: baz
-    command: cat baz.txt && rm -f baz.txt
+    command: cat baz1.txt && cat baz2.txt && rm -f baz1.txt baz2.txt
     fixes:
-      - key: skipped
+      - key: always-skipped
         command: exit 1
       - key: always-fails
         command: exit 2
-      - key: touch-it
-        command: touch baz.txt
+      - key: touch-baz1
+        command: |
+          if [ -f baz1.txt ]; then
+            exit 1
+          fi
+          touch baz1.txt
+      - key: touch-baz2
+        command: |
+          if [ -f baz2.txt ]; then
+            exit 1
+          fi
+          touch baz2.txt

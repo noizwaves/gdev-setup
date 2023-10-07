@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 
 	"gopkg.in/yaml.v3"
 )
@@ -60,62 +61,87 @@ type executor struct {
 }
 
 func (e *executor) Execute() error {
+STEP:
 	for _, s := range e.config.Steps {
-		err := executeStep(e.projectPath, &s)
+		attemptedFixes := make([]string, len(s.Fixes))
 
-		// Step succeeded -> move onto next step
-		if err == nil {
-			continue
-		}
+	WHILE:
+		for {
+			err := executeStep(e.projectPath, &s)
 
-		// No fixes -> exit with failure
-		if len(s.Fixes) == 0 {
-			return err
-		}
+			if err == nil {
+				continue STEP
+			}
 
-		// Try some fixes
-		fmt.Printf("Step '%s' failed to run, trying fixes...\n", s.Key)
-		for _, f := range s.Fixes {
-			executeFix(e.projectPath, &f)
-		}
+			fmt.Printf("Step '%s' failed to run, trying fixes 🛠️\n", s.Key)
+			for _, f := range s.Fixes {
+				if slices.Contains(attemptedFixes, f.Key) {
+					continue
+				}
 
-		// Try the step again
-		err = executeStep(e.projectPath, &s)
+				result, err := executeFix(e.projectPath, &f)
 
-		// Fixes didn't work -> exit with failure
-		if err != nil {
+				if err != nil {
+					return err
+				}
+
+				switch result {
+				case FixResultSuccess:
+					attemptedFixes = append(attemptedFixes, f.Key)
+					// try the step again
+					fmt.Printf("- Trying step '%s' again 🤞\n", s.Key)
+					continue WHILE
+				case FixResultSkipped:
+					// try the next fix
+					continue
+				case FixResultFailed:
+					attemptedFixes = append(attemptedFixes, f.Key)
+					// try the next fix
+					continue
+				}
+			}
+
+			// no more fixes to attempt
 			return err
 		}
 	}
 	return nil
 }
 
-func executeFix(projectPath string, fix *fixConfig) error {
+type fixResult int
+
+const (
+	FixResultSuccess fixResult = iota
+	FixResultSkipped fixResult = iota
+	FixResultFailed  fixResult = iota
+)
+
+func executeFix(projectPath string, fix *fixConfig) (fixResult, error) {
 	cmd := exec.Command("bash", "-c", fix.Command)
 	cmd.Env = os.Environ()
 	cmd.Dir = projectPath
 
 	err := cmd.Run()
 
-	// Some errors aren't failures
+	// Some errors aren't fix failures
 	exitCode := cmd.ProcessState.ExitCode()
 	if exitCode == 1 {
-		fmt.Printf("Fix '%s' was skipped\n", fix.Key)
-		return nil
+		fmt.Printf("- Fix '%s' was skipped\n", fix.Key)
+		return FixResultSkipped, nil
 	}
 	if exitCode != 0 {
-		fmt.Printf("[Warning] Fix '%s' exited with code %d\n", fix.Key, exitCode)
-		return nil
+		fmt.Printf("- Fix '%s' failed with exit code %d\n", fix.Key, exitCode)
+		return FixResultFailed, nil
 	}
 
 	// Other falure with executing command
 	if err != nil {
-		return fmt.Errorf("Fix '%s' failed to run: %w", fix.Key, err)
+		return 0, fmt.Errorf("- Fix '%s' failed to run: %w", fix.Key, err)
 	}
 
-	fmt.Printf("Fix '%s' ran successfully\n", fix.Key)
+	fmt.Printf("- Fix '%s' ran successfully\n", fix.Key)
 
-	return nil
+	return FixResultSuccess, nil
 }
 
 func executeStep(projectPath string, step *stepConfig) error {
