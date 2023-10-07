@@ -2,6 +2,10 @@
 
 Easily set up bare metal local dev environments.
 
+## Example
+
+`go run . --workDir $(pwd)/core/testdata/example`
+
 ## Configuration
 
 ### Commands
