@@ -1,0 +1,5 @@
+steps:
+  - key: foo
+    command: echo foo
+  - key: bar
+    command: echo bar
