@@ -1,4 +1,5 @@
 .envrc
-.gdev-setup
+gdev-setup
+gdev-setup-testable
 
 core/testdata/example/baz.txt

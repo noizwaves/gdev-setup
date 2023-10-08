@@ -4,7 +4,7 @@ Easily set up bare metal local dev environments.
 
 ## Example
 
-`go run . --workDir $(pwd)/core/testdata/example`
+`go run . --workDir $(pwd)/testdata/happy-path`
 
 ## Configuration
 
