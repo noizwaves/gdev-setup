@@ -60,54 +60,113 @@ type executor struct {
 	projectPath string
 }
 
+func NewExecutor(projectPath string) (Executor, error) {
+	configPath := filepath.Join(projectPath, ".gdev", "gdev.setup.yaml")
+	config, err := parseConfig(configPath)
+	if err != nil {
+		return nil, err
+	}
+
+	return &executor{
+		config:      config,
+		projectPath: projectPath,
+	}, nil
+}
+
 func (e *executor) Execute() error {
-STEP:
 	for _, s := range e.config.Steps {
-		attemptedFixes := make([]string, len(s.Fixes))
-
-	WHILE:
-		for {
-			err := executeStep(e.projectPath, &s)
-
-			if err == nil {
-				continue STEP
-			}
-
-			fmt.Printf("Step '%s' failed to run, trying fixes 🛠️\n", s.Key)
-			for _, f := range s.Fixes {
-				if slices.Contains(attemptedFixes, f.Key) {
-					continue
-				}
-
-				result, err := executeFix(e.projectPath, &f)
-
-				if err != nil {
-					return err
-				}
-
-				switch result {
-				case FixResultSuccess:
-					attemptedFixes = append(attemptedFixes, f.Key)
-					// try the step again
-					fmt.Printf("- Trying step '%s' again 🤞\n", s.Key)
-					continue WHILE
-				case FixResultSkipped:
-					// try the next fix
-					continue
-				case FixResultFailed:
-					attemptedFixes = append(attemptedFixes, f.Key)
-					// try the next fix
-					continue
-				}
-			}
-
-			// no more fixes to attempt
+		err := executeStep(e.projectPath, &s, nil)
+		if err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+/*
+ * Steps
+ */
+
+type stepState struct {
+	attemptedFixes []string
+}
+
+func (s *stepState) AddAttempt(f *fixConfig) {
+	s.attemptedFixes = append(s.attemptedFixes, f.Key)
+}
+
+func (s *stepState) WasAttempted(f *fixConfig) bool {
+	return slices.Contains(s.attemptedFixes, f.Key)
+}
+
+func NewStepState(step *stepConfig) *stepState {
+	return &stepState{
+		attemptedFixes: make([]string, len(step.Fixes)),
+	}
+}
+
+func executeStep(projectPath string, step *stepConfig, state *stepState) error {
+	if state == nil {
+		state = NewStepState(step)
+	}
+
+	err := executeStepCommand(projectPath, step)
+	if err == nil {
+		return nil
+	}
+
+	fmt.Printf("Step '%s' failed to run, trying fixes 🛠️\n", step.Key)
+	for _, f := range step.Fixes {
+		if state.WasAttempted(&f) {
+			continue
+		}
+
+		result, err := executeFixCommand(projectPath, &f)
+		if err != nil {
+			return err
+		}
+
+		switch result {
+		case FixResultSuccess:
+			state.AddAttempt(&f)
+			fmt.Printf("- Trying step '%s' again 🤞\n", step.Key)
+			return executeStep(projectPath, step, state)
+		case FixResultSkipped:
+			// try the next fix
+			continue
+		case FixResultFailed:
+			state.AddAttempt(&f)
+			// try the next fix
+			continue
+		}
+	}
+
+	// no more fixes to attempt
+	return err
+}
+
+func executeStepCommand(projectPath string, step *stepConfig) error {
+	cmd := exec.Command("bash", "-c", step.Command)
+	cmd.Env = os.Environ()
+	cmd.Dir = projectPath
+
+	err := cmd.Run()
+	if err != nil {
+		return fmt.Errorf("Step '%s' failed to run: %w", step.Key, err)
+	}
+
+	if exitCode := cmd.ProcessState.ExitCode(); exitCode != 0 {
+		return fmt.Errorf("Step '%s' exited with code %d", step.Key, exitCode)
+	}
+
+	fmt.Printf("Step '%s' ran successfully\n", step.Key)
+
+	return nil
+}
+
+/*
+ * Fixes
+ */
 type fixResult int
 
 const (
@@ -116,7 +175,7 @@ const (
 	FixResultFailed  fixResult = iota
 )
 
-func executeFix(projectPath string, fix *fixConfig) (fixResult, error) {
+func executeFixCommand(projectPath string, fix *fixConfig) (fixResult, error) {
 	cmd := exec.Command("bash", "-c", fix.Command)
 	cmd.Env = os.Environ()
 	cmd.Dir = projectPath
@@ -142,36 +201,4 @@ func executeFix(projectPath string, fix *fixConfig) (fixResult, error) {
 	fmt.Printf("- Fix '%s' ran successfully\n", fix.Key)
 
 	return FixResultSuccess, nil
-}
-
-func executeStep(projectPath string, step *stepConfig) error {
-	cmd := exec.Command("bash", "-c", step.Command)
-	cmd.Env = os.Environ()
-	cmd.Dir = projectPath
-
-	err := cmd.Run()
-	if err != nil {
-		return fmt.Errorf("Step '%s' failed to run: %w", step.Key, err)
-	}
-
-	if exitCode := cmd.ProcessState.ExitCode(); exitCode != 0 {
-		return fmt.Errorf("Step '%s' exited with code %d", step.Key, exitCode)
-	}
-
-	fmt.Printf("Step '%s' ran successfully\n", step.Key)
-
-	return nil
-}
-
-func NewExecutor(projectPath string) (Executor, error) {
-	configPath := filepath.Join(projectPath, ".gdev", "gdev.setup.yaml")
-	config, err := parseConfig(configPath)
-	if err != nil {
-		return nil, err
-	}
-
-	return &executor{
-		config:      config,
-		projectPath: projectPath,
-	}, nil
 }
