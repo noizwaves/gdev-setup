@@ -6,20 +6,21 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
-/*
- * Interface
- */
+// ***
+// Interface
+// ***
 type Executor interface {
 	Execute() error
 }
 
-/*
- * Config
- */
+// ***
+// Config
+// ***
 type setupConfig struct {
 	Steps []stepConfig `yaml:"steps"`
 }
@@ -52,12 +53,17 @@ func parseConfig(configPath string) (*setupConfig, error) {
 	return &result, nil
 }
 
-/*
- * Implementation
- */
+// ***
+// Implementation
+// ***
 type executor struct {
-	config      *setupConfig
-	projectPath string
+	config  *setupConfig
+	context *executionContext
+}
+
+type executionContext struct {
+	ProjectPath   string
+	LogOutputPath string
 }
 
 func NewExecutor(projectPath string) (Executor, error) {
@@ -67,15 +73,23 @@ func NewExecutor(projectPath string) (Executor, error) {
 		return nil, err
 	}
 
+	logOutputPath, err := os.MkdirTemp("", "gdev-setup")
+	if err != nil {
+		return nil, err
+	}
+
 	return &executor{
-		config:      config,
-		projectPath: projectPath,
+		config: config,
+		context: &executionContext{
+			ProjectPath:   projectPath,
+			LogOutputPath: logOutputPath,
+		},
 	}, nil
 }
 
 func (e *executor) Execute() error {
 	for _, s := range e.config.Steps {
-		err := executeStep(e.projectPath, &s, nil)
+		err := executeStep(e.context, &s, nil)
 		if err != nil {
 			return err
 		}
@@ -83,10 +97,9 @@ func (e *executor) Execute() error {
 	return nil
 }
 
-/*
- * Steps
- */
-
+// ***
+// Steps
+// ***
 type stepState struct {
 	attemptedFixes []string
 }
@@ -105,23 +118,33 @@ func NewStepState(step *stepConfig) *stepState {
 	}
 }
 
-func executeStep(projectPath string, step *stepConfig, state *stepState) error {
+func executeStep(context *executionContext, step *stepConfig, state *stepState) error {
 	if state == nil {
 		state = NewStepState(step)
 	}
 
-	err := executeStepCommand(projectPath, step)
-	if err == nil {
+	result, err := executeStepCommand(context, step)
+	// error with command preparation
+	if err != nil {
+		return err
+	}
+
+	// step command exited successfully
+	if result.RuntimeError == nil {
 		return nil
 	}
 
+	// step command did not exit successfully
+	err = result.RuntimeError
+
 	fmt.Printf("Step '%s' failed to run, trying fixes 🛠️\n", step.Key)
+	// fmt.Printf("Step log output located at %s\n", result.LogFilePath)
 	for _, f := range step.Fixes {
 		if state.WasAttempted(&f) {
 			continue
 		}
 
-		result, err := executeFixCommand(projectPath, &f)
+		result, err := executeFixCommand(context, &f, result.LogFilePath)
 		if err != nil {
 			return err
 		}
@@ -130,7 +153,7 @@ func executeStep(projectPath string, step *stepConfig, state *stepState) error {
 		case FixResultSuccess:
 			state.AddAttempt(&f)
 			fmt.Printf("- Trying step '%s' again 🤞\n", step.Key)
-			return executeStep(projectPath, step, state)
+			return executeStep(context, step, state)
 		case FixResultSkipped:
 			// try the next fix
 			continue
@@ -145,28 +168,41 @@ func executeStep(projectPath string, step *stepConfig, state *stepState) error {
 	return err
 }
 
-func executeStepCommand(projectPath string, step *stepConfig) error {
-	cmd := exec.Command("bash", "-c", step.Command)
-	cmd.Env = os.Environ()
-	cmd.Dir = projectPath
-
-	err := cmd.Run()
-	if err != nil {
-		return fmt.Errorf("Step '%s' failed to run: %w", step.Key, err)
-	}
-
-	if exitCode := cmd.ProcessState.ExitCode(); exitCode != 0 {
-		return fmt.Errorf("Step '%s' exited with code %d", step.Key, exitCode)
-	}
-
-	fmt.Printf("Step '%s' ran successfully\n", step.Key)
-
-	return nil
+type stepExecResult struct {
+	LogFilePath  string
+	RuntimeError error
 }
 
-/*
- * Fixes
- */
+func executeStepCommand(context *executionContext, step *stepConfig) (*stepExecResult, error) {
+	cmd := exec.Command("bash", "-c", step.Command)
+	cmd.Env = os.Environ()
+	cmd.Dir = context.ProjectPath
+
+	// Capture output
+	logFileName := fmt.Sprintf("%d-%s.log", time.Now().UnixMilli(), step.Key)
+	logFilePath := filepath.Join(context.LogOutputPath, logFileName)
+	logFile, err := os.Create(logFilePath)
+	if err != nil {
+		return nil, fmt.Errorf("Step '%s' failed to create output log file: %s", step.Key, err)
+	}
+	defer logFile.Close()
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+
+	err = cmd.Run()
+	if err == nil {
+		fmt.Printf("Step '%s' ran successfully\n", step.Key)
+	}
+
+	return &stepExecResult{
+		LogFilePath:  logFilePath,
+		RuntimeError: err,
+	}, nil
+}
+
+// ***
+// Fixes
+// ***
 type fixResult int
 
 const (
@@ -175,10 +211,11 @@ const (
 	FixResultFailed  fixResult = iota
 )
 
-func executeFixCommand(projectPath string, fix *fixConfig) (fixResult, error) {
+func executeFixCommand(context *executionContext, fix *fixConfig, stepLogPath string) (fixResult, error) {
 	cmd := exec.Command("bash", "-c", fix.Command)
 	cmd.Env = os.Environ()
-	cmd.Dir = projectPath
+	cmd.Dir = context.ProjectPath
+	cmd.Env = append(cmd.Env, "STEP_LOG_PATH="+stepLogPath)
 
 	err := cmd.Run()
 

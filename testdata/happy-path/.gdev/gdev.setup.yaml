@@ -12,13 +12,13 @@ steps:
         command: exit 2
       - key: touch-baz1
         command: |
-          if [ -f baz1.txt ]; then
+          if ! grep "baz1.txt: No such file or directory" "$STEP_LOG_PATH"; then
             exit 1
           fi
           touch baz1.txt
       - key: touch-baz2
         command: |
-          if [ -f baz2.txt ]; then
+          if ! grep "baz2.txt: No such file or directory" "$STEP_LOG_PATH"; then
             exit 1
           fi
           touch baz2.txt
