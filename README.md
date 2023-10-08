@@ -16,6 +16,7 @@ Setup configuration stored in a YAML file at `.gdev/gdev.setup.yaml`.
 
 Examples include:
 - [happy-path](./testdata/happy-path/.gdev/gdev.setup.yaml)
+- [some-known-issues](./testdata/some-known-issues/.gdev/gdev.setup.yaml)
 
 ### Steps
 
@@ -34,3 +35,7 @@ Fix result is determined by the command exit code:
 - `success`: exit with `0`
 - `skip`: exit with `1`
 - `failure`: anything else
+
+### Known Issues
+
+Known issues will be displayed when all fixes have been attempted.

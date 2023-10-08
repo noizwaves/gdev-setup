@@ -26,14 +26,21 @@ type setupConfig struct {
 }
 
 type stepConfig struct {
-	Key     string      `yaml:"key"`
-	Command string      `yaml:"command"`
-	Fixes   []fixConfig `yaml:"fixes,omitempty"`
+	Key         string             `yaml:"key"`
+	Command     string             `yaml:"command"`
+	Fixes       []fixConfig        `yaml:"fixes,omitempty"`
+	KnownIssues []knownIssueConfig `yaml:"known-issues,omitempty"`
 }
 
 type fixConfig struct {
 	Key     string `yaml:"key"`
 	Command string `yaml:"command"`
+}
+
+type knownIssueConfig struct {
+	Key      string `yaml:"key"`
+	Problem  string `yaml:"problem"`
+	Solution string `yaml:"solution"`
 }
 
 func parseConfig(configPath string) (*setupConfig, error) {
@@ -138,7 +145,6 @@ func executeStep(context *executionContext, step *stepConfig, state *stepState) 
 	err = result.RuntimeError
 
 	fmt.Printf("Step '%s' failed to run, trying fixes 🛠️\n", step.Key)
-	// fmt.Printf("Step log output located at %s\n", result.LogFilePath)
 	for _, f := range step.Fixes {
 		if state.WasAttempted(&f) {
 			continue
@@ -164,7 +170,9 @@ func executeStep(context *executionContext, step *stepConfig, state *stepState) 
 		}
 	}
 
-	// no more fixes to attempt
+	// no more fixes to attempt, fall back to known issues
+	showKnownIssues(step)
+
 	return err
 }
 
@@ -238,4 +246,19 @@ func executeFixCommand(context *executionContext, fix *fixConfig, stepLogPath st
 	fmt.Printf("- Fix '%s' ran successfully\n", fix.Key)
 
 	return FixResultSuccess, nil
+}
+
+// ***
+// Known Issues
+// ***
+func showKnownIssues(step *stepConfig) {
+	if len(step.KnownIssues) == 0 {
+		return
+	}
+
+	fmt.Printf("Step '%s' has the following known issues:\n", step.Key)
+
+	for i, ki := range step.KnownIssues {
+		fmt.Printf("Problem (%d): %s\nSolution (%d): %s\n", i+1, ki.Problem, i+1, ki.Solution)
+	}
 }
