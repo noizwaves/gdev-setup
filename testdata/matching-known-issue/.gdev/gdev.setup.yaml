@@ -1,0 +1,11 @@
+steps:
+  - key: foo
+    command: cat foo.txt
+    known-issues:
+      - key: missing-foo
+        problem: the foo.txt file is missing
+        solution: open foo.txt in your IDE and populate it
+      - key: sometimes-happens
+        problem: cosmic ray hits ssd, flips an important bit
+        solution: hope another cosmic ray flips it back
+        log-regex: "No such file or directory"

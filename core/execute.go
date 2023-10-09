@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"time"
 
@@ -41,6 +42,7 @@ type knownIssueConfig struct {
 	Key      string `yaml:"key"`
 	Problem  string `yaml:"problem"`
 	Solution string `yaml:"solution"`
+	LogRegex string `yaml:"log-regex,omitempty"`
 }
 
 func parseConfig(configPath string) (*setupConfig, error) {
@@ -171,7 +173,7 @@ func executeStep(context *executionContext, step *stepConfig, state *stepState) 
 	}
 
 	// no more fixes to attempt, fall back to known issues
-	showKnownIssues(step)
+	showKnownIssues(step, result)
 
 	return err
 }
@@ -251,14 +253,49 @@ func executeFixCommand(context *executionContext, fix *fixConfig, stepLogPath st
 // ***
 // Known Issues
 // ***
-func showKnownIssues(step *stepConfig) {
+func showKnownIssues(step *stepConfig, result *stepExecResult) error {
 	if len(step.KnownIssues) == 0 {
-		return
+		fmt.Println("early exit")
+		return nil
 	}
 
-	fmt.Printf("Step '%s' has the following known issues:\n", step.Key)
+	match, err := findingMatchingIssue(step, result.LogFilePath)
+	if err != nil {
+		return err
+	}
 
+	if match != nil {
+		fmt.Printf("Step '%s' failed because of a known issue:\n", step.Key)
+		fmt.Printf("Problem: %s\nSolution: %s\n", match.Problem, match.Solution)
+		return nil
+	}
+
+	fmt.Printf("Step '%s' failure did not match the known issues. The known issues are:\n", step.Key)
 	for i, ki := range step.KnownIssues {
 		fmt.Printf("Problem (%d): %s\nSolution (%d): %s\n", i+1, ki.Problem, i+1, ki.Solution)
 	}
+	return nil
+}
+
+func findingMatchingIssue(step *stepConfig, logFilePath string) (*knownIssueConfig, error) {
+	logs, err := os.ReadFile(logFilePath)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, ki := range step.KnownIssues {
+		if ki.LogRegex == "" {
+			continue
+		}
+
+		match, err := regexp.Match(ki.LogRegex, logs)
+		if err != nil {
+			return nil, err
+		}
+
+		if match {
+			return &ki, nil
+		}
+	}
+	return nil, nil
 }

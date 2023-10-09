@@ -42,11 +42,25 @@ Step 'baz' ran successfully
 		output := runGdevSetup(t, "--workDir", exampleDir)
 
 		expected := `Step 'foo' failed to run, trying fixes 🛠️
-Step 'foo' has the following known issues:
+Step 'foo' failure did not match the known issues. The known issues are:
 Problem (1): the foo.txt file is missing
 Solution (1): open foo.txt in your IDE and populate it
 Problem (2): cosmic ray hits ssd, flips an important bit
 Solution (2): hope another cosmic ray flips it back
+`
+
+		assert.Equal(t, expected, output)
+	})
+
+	t.Run("MatchingKnownIssue", func(t *testing.T) {
+		exampleDir := buildExampleDir(t, "matching-known-issue")
+
+		output := runGdevSetup(t, "--workDir", exampleDir)
+
+		expected := `Step 'foo' failed to run, trying fixes 🛠️
+Step 'foo' failed because of a known issue:
+Problem: cosmic ray hits ssd, flips an important bit
+Solution: hope another cosmic ray flips it back
 `
 
 		assert.Equal(t, expected, output)
